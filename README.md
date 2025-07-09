@@ -14,3 +14,6 @@ Copyright © 2024-2025 by Sebastian Raschka.):  https://sebastianraschka.com/boo
 11. ReLU (Activation function, which in short, will help our network to learn how to make more sophisticated guesses about data than if it were required to make guesses based on some strictly linear function.
 
 ): https://docs.pytorch.org/docs/stable/generated/torch.nn.ReLU.html
+
+### Others 
+1. https://energy-based-transformers.github.io/
