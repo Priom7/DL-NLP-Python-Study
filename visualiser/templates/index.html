@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PyTorch Model Visualizer & Simulator</title>
+<script src="https://unpkg.com/cytoscape@3.25.1/dist/cytoscape.min.js"></script>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    max-width: 960px;
+    margin: 20px auto;
+    padding: 0 15px;
+  }
+  h1 {
+    text-align: center;
+    color: #0052cc;
+  }
+  #upload-section, #simulate-section {
+    background: #f9faff;
+    border: 1px solid #cbd6e2;
+    padding: 15px 20px;
+    margin-bottom: 25px;
+    border-radius: 6px;
+  }
+  button {
+    background: #0052cc;
+    border: none;
+    color: white;
+    padding: 10px 18px;
+    font-size: 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+  button:disabled {
+    background: #ccc;
+    cursor: default;
+  }
+  #cy {
+    height: 500px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.1);
+  }
+  label {
+    display: block;
+    margin: 10px 0 5px;
+  }
+  input[type="number"] {
+    width: 100px;
+    padding: 6px 8px;
+    margin-right: 10px;
+  }
+  #outputs {
+    margin-top: 15px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    background: #eef2ff;
+    padding: 10px;
+    border-radius: 6px;
+  }
+  #input-fields {
+    margin-top: 10px;
+  }
+  #simulate-section p {
+    font-size: 0.9rem;
+    color: #555;
+  }
+</style>
+</head>
+<body>
+  <h1>PyTorch Model Visualizer & Simulator</h1>
+
+  <section id="upload-section">
+    <h2>Upload Model (.pth)</h2>
+    <input type="file" id="fileInput" accept=".pth" />
+    <button id="uploadBtn" onclick="uploadModel()">Upload & Visualize</button>
+  </section>
+
+  <section id="visualizer-section" style="display:none;">
+    <h2>Model Architecture</h2>
+    <div id="cy"></div>
+  </section>
+
+  <section id="simulate-section" style="display:none;">
+    <h2>Simulate Input Data</h2>
+    <p>Enter input feature values for simulation and click <strong>Run Simulation</strong>.</p>
+    <div id="input-fields"></div>
+    <button id="simulateBtn" onclick="runSimulation()">Run Simulation</button>
+
+    <h3>Layer Outputs</h3>
+    <pre id="outputs">No simulation run yet.</pre>
+  </section>
+
+  <script>
+    let cy;
+    let lastNodes = [];
+
+    function uploadModel() {
+      const fileInput = document.getElementById('fileInput');
+      const file = fileInput.files[0];
+      if (!file) {
+        alert('Please select a .pth file.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      document.getElementById('uploadBtn').disabled = true;
+      fetch('/upload', { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById('uploadBtn').disabled = false;
+          if (data.error) {
+            alert('Error: ' + data.error);
+            return;
+          }
+          lastNodes = data.nodes;
+          document.getElementById('visualizer-section').style.display = 'block';
+          document.getElementById('simulate-section').style.display = 'block';
+          renderGraph(data.nodes, data.edges);
+          setupInputFields(data.nodes);
+        })
+        .catch(err => {
+          alert('Upload failed: ' + err);
+          document.getElementById('uploadBtn').disabled = false;
+        });
+    }
+
+    function renderGraph(nodes, edges) {
+      if (cy) cy.destroy();
+      cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: { nodes: nodes, edges: edges },
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'background-color': '#0052cc',
+              'label': 'data(label)',
+              'color': '#fff',
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'font-size': 11,
+              'width': 'label',
+              'height': 'label',
+              'padding': '6px',
+              'shape': 'roundrectangle',
+              'text-wrap': 'wrap',
+              'text-max-width': 140,
+              'text-outline-width': 2,
+              'text-outline-color': '#003a75'
+            }
+          },
+          {
+            selector: 'edge',
+            style: {
+              'width': 3,
+              'line-color': '#a8c0ff',
+              'target-arrow-color': '#a8c0ff',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'bezier'
+            }
+          }
+        ],
+        layout: { name: 'cose', animate: true, animationDuration: 800 }
+      });
+    }
+
+    // For simulation: create input fields based on the first layer's input size (guess from node labels)
+    function setupInputFields(nodes) {
+      const container = document.getElementById('input-fields');
+      container.innerHTML = '';
+
+      if (!nodes.length) {
+        container.textContent = 'No input fields available';
+        return;
+      }
+
+      // Try to parse input size from first layer's tensor shape
+      // Example label: "layer0.weight\n[4,2]"
+      const firstNode = nodes[0];
+      const label = firstNode.data.label;
+      const shapeMatch = label.match(/\[([0-9,\s]+)\]/);
+      let inputSize = 1;
+      if (shapeMatch) {
+        const dims = shapeMatch[1].split(',').map(s => parseInt(s.trim()));
+        if (dims.length >= 2) {
+          inputSize = dims[1]; // weight shape [out_features, in_features]
+        }
+      }
+
+      for (let i = 0; i < inputSize; i++) {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = 'any';
+        input.id = `input_${i}`;
+        input.placeholder = `Feature ${i + 1}`;
+        input.value = (Math.random() * 2 - 1).toFixed(2);
+        container.appendChild(input);
+      }
+    }
+
+    function runSimulation() {
+      const inputValues = [];
+      const inputs = document.querySelectorAll('#input-fields input');
+      for (const inp of inputs) {
+        const val = parseFloat(inp.value);
+        if (isNaN(val)) {
+          alert('Please enter valid numbers in all input fields');
+          return;
+        }
+        inputValues.push(val);
+      }
+
+      if (!inputValues.length) {
+        alert('No input data provided');
+        return;
+      }
+
+      document.getElementById('simulateBtn').disabled = true;
+      document.getElementById('outputs').textContent = 'Running simulation...';
+
+      fetch('/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: inputValues })
+      })
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById('simulateBtn').disabled = false;
+          if (data.error) {
+            document.getElementById('outputs').textContent = 'Error: ' + data.error;
+            return;
+          }
+          // Pretty-print outputs for each layer
+          let outputText = '';
+          data.outputs.forEach((out, i) => {
+            outputText += `Layer ${i + 1} output:\n${JSON.stringify(out, null, 2)}\n\n`;
+          });
+          document.getElementById('outputs').textContent = outputText;
+        })
+        .catch(err => {
+          document.getElementById('simulateBtn').disabled = false;
+          document.getElementById('outputs').textContent = 'Error: ' + err;
+        });
+    }
+  </script>
+</body>
+</html>
